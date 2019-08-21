@@ -35,6 +35,40 @@ def tria(matrix):
     return lower_triangular
 
 
+def cholesky_eps(A, lower=False):
+    """Perform a Cholesky decomposition on a nearly positive-definite matrix.
+
+    This should return similar results to NumPy/SciPy Cholesky decompositions,
+    but compromises for cases for non positive-definite matrix.
+
+    Parameters
+    ----------
+    A : numpy.ndarray
+        Symmetric positive-definite matrix.
+    lower : bool
+        Whether to return lower or upper triangular decomposition. Default
+        `False` which returns upper.
+
+    Returns
+    -------
+    L : numpy.ndarray
+        Upper/lower triangular Cholesky decomposition.
+    """
+    eps = np.spacing(np.max(np.diag(A)))
+
+    L = np.zeros(A.shape)
+    for i in range(A.shape[0]):
+        for j in range(i):
+            L[i, j] = (A[i, j] - L[i, :]@L[j, :].T) / L[j, j]
+        val = A[i, i] - L[i, :]@L[i, :].T
+        L[i, i] = np.sqrt(val) if val > eps else np.sqrt(eps)
+
+    if lower:
+        return L
+    else:
+        return L.T
+
+
 def jacobian(fun, x):
     """Compute Jacobian through finite difference calculation
 
@@ -544,4 +578,34 @@ def mod_elevation(x):
         x = np.pi - x
     elif N == 3:
         x = x - 2.0 * np.pi
+    return x
+
+
+def sde_euler_maruyama_integration(fun, t_values, x0):
+    """Perform SDE Euler Maruyama Integration
+
+    Performs Stochastic Differential Equation Integration using the Euler
+    Maruyama method.
+
+    Parameters
+    ----------
+    fun : callable
+        Function to integrate.
+    t_values : list of :class:`float`
+        Time values to integrate over
+    x0 : :class:`numpy.ndarray`
+        Initial `x` value for time in first value in :obj:`t_values`.
+
+    Returns
+    -------
+    : :class:`numpy.ndarray`
+        Final `x` value for the time in last value in :obj:`t_values`
+
+    """
+    x = x0.copy()
+    for t, next_t in zip(t_values[:-1], t_values[1:]):
+        delta_t = next_t - t
+        delta_w = np.random.normal(scale=np.sqrt(delta_t), size=x.shape)
+        a, b = fun(x, t)
+        x += a*delta_t + b@delta_w
     return x
