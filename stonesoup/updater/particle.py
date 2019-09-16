@@ -6,6 +6,7 @@ import numpy as np
 from scipy.linalg import inv
 
 from .base import Updater
+from .kalman import KalmanUpdater, ExtendedKalmanUpdater
 from ..base import Property
 from ..functions import cholesky_eps, sde_euler_maruyama_integration
 from ..resampler import Resampler
@@ -16,12 +17,17 @@ from ..types.update import ParticleStateUpdate
 
 
 class ParticleUpdater(Updater):
-    """Simple Particle Updater
+    """Particle Updater
 
-        Perform measurement update step in the standard Kalman Filter.
-        """
+    Perform an update by multiplying particle weights by PDF of measurement
+    model (either :attr:`~.Detection.measurement_model` or
+    :attr:`measurement_model`), and normalising the weights. If provided, a
+    :attr:`resampler` will be used to take a new sample of particles (this is
+    called every time, and it's up to the resampler to decide if resampling is
+    required).
+    """
 
-    resampler = Property(Resampler,
+    resampler = Property(Resampler, default=None,
                          doc='Resampler to prevent particle degeneracy')
 
     def update(self, hypothesis, **kwargs):
@@ -43,22 +49,25 @@ class ParticleUpdater(Updater):
         else:
             measurement_model = hypothesis.measurement.measurement_model
 
-        for particle in hypothesis.prediction.particles:
+        particles = [copy.copy(particle)
+                     for particle in hypothesis.prediction.particles]
+
+        for particle in particles:
             particle.weight *= measurement_model.pdf(
                 hypothesis.measurement.state_vector, particle.state_vector,
                 **kwargs)
 
         # Normalise the weights
         sum_w = Probability.sum(
-            i.weight for i in hypothesis.prediction.particles)
-        for particle in hypothesis.prediction.particles:
+            i.weight for i in particles)
+        for particle in particles:
             particle.weight /= sum_w
 
         # Resample
-        new_particles = self.resampler.resample(
-            hypothesis.prediction.particles)
+        if self.resampler is not None:
+            particles = self.resampler.resample(particles)
 
-        return ParticleStateUpdate(new_particles,
+        return ParticleStateUpdate(particles,
                                    hypothesis,
                                    timestamp=hypothesis.measurement.timestamp)
 
@@ -86,7 +95,8 @@ class GromovFlowParticleUpdater(Updater):
     """Gromov Flow Particle Updater
 
     This is implementation of Gromov method for stochastic particle flow
-    filters [1]_.
+    filters [1]_. The Euler Maruyama method is used for integration, over 20
+    steps using an exponentially increase step size.
 
     Parameters
     ----------
@@ -94,7 +104,7 @@ class GromovFlowParticleUpdater(Updater):
     References
     ----------
     .. [1] Daum, Fred & Huang, Jim & Noushin, Arjang. "Generalized Gromov
-       method for stochastic particle flow filters." 2017
+           method for stochastic particle flow filters." 2017
     """
 
     def update(self, hypothesis, **kwargs):
@@ -151,3 +161,65 @@ class GromovFlowParticleUpdater(Updater):
             timestamp=hypothesis.measurement.timestamp)
 
     predict_measurement = ParticleUpdater.predict_measurement
+
+
+class GromovFlowKalmanParticleUpdater(GromovFlowParticleUpdater):
+    """Gromov Flow Parallel Kalman Particle Updater
+
+    This is a wrapper around the :class:`~.GromovFlowParticleUpdater` which
+    can use a :class:`~.ExtendedKalmanUpdater` or
+    :class:`~.UnscentedKalmanUpdater` in parallel in order to maintain a state
+    covariance, as proposed in [1]_. In this implementation, the mean of the
+    :class:`~.ParticleState` is used the EKF/UKF update.
+
+    This should be used in conjunction with the
+    :class:`~.ParticleFlowKalmanPredictor`.
+
+    Parameters
+    ----------
+
+    References
+    ----------
+    .. [1] Ding, Tao & Coates, Mark J., "Implementation of the Daum-Huang
+       Exact-Flow Particle Filter" 2012
+    """
+    kalman_updater = Property(
+        KalmanUpdater,
+        default=None,
+        doc="Kalman updater to use. Default `None` where a new instance of"
+            ":class:`~.ExtendedKalmanUpdater` will be created utilising the"
+            "same measurement model.")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if self.kalman_updater is None:
+            self.kalman_updater = ExtendedKalmanUpdater(
+                self.measurement_model)
+
+    def update(self, hypothesis, **kwargs):
+        particle_update = super().update(hypothesis, **kwargs)
+
+        kalman_hypothesis = copy.copy(hypothesis)
+        # Needed for cross covar
+        kalman_hypothesis.measurement_prediction = None
+        kalman_update = self.kalman_updater.update(kalman_hypothesis, **kwargs)
+
+        return ParticleStateUpdate(
+            particle_update.particles,
+            hypothesis,
+            kalman_update.covar,
+            timestamp=particle_update.timestamp)
+
+    def predict_measurement(
+            self, state_prediction, *args, **kwargs):
+        particle_prediction = super().predict_measurement(
+            state_prediction, *args, **kwargs)
+
+        kalman_prediction = self.kalman_updater.predict_measurement(
+            state_prediction, *args, **kwargs)
+
+        return ParticleMeasurementPrediction(
+            particle_prediction.particles,
+            kalman_prediction.covar,
+            timestamp=particle_prediction.timestamp)

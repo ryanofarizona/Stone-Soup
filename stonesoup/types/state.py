@@ -152,19 +152,20 @@ class ParticleState(Type):
 
     This is a particle state object which describes the state as a
     distribution of particles"""
-
-    timestamp = Property(datetime.datetime, default=None,
-                         doc="Timestamp of the state. Default None.")
     particles = Property([Particle],
                          doc='List of particles representing state')
+    fixed_covar = Property(CovarianceMatrix, default=None,
+                           doc='Fixed covariance value. Default `None`, where'
+                               'weighted sample covariance is then used.')
+    timestamp = Property(datetime.datetime, default=None,
+                         doc="Timestamp of the state. Default None.")
 
     @property
     def mean(self):
         """The state mean, equivalent to state vector"""
         result = np.average([p.state_vector for p in self.particles], axis=0,
-                            weights=[p.weight for p in self.particles])
-        # Convert type as may have type of weights
-        return result.astype(np.float, copy=False)
+                            weights=[float(p.weight) for p in self.particles])
+        return result
 
     @property
     def state_vector(self):
@@ -173,9 +174,10 @@ class ParticleState(Type):
 
     @property
     def covar(self):
+        if self.fixed_covar is not None:
+            return self.fixed_covar
         cov = np.cov(np.hstack([p.state_vector for p in self.particles]),
                      ddof=0, aweights=[p.weight for p in self.particles])
         # Fix one dimensional covariances being returned with zero dimension
-        if not cov.shape:
-            cov = cov.reshape(1, 1)
-        return cov
+        return np.atleast_2d(cov)
+State.register(ParticleState)  # noqa:E305
