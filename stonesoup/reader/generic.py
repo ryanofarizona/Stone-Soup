@@ -65,8 +65,14 @@ class CSVGroundTruthReader(GroundTruthReader, TextFileReader):
                 state = GroundTruthState(np.array(
                     [[row[col_name]] for col_name in self.state_vector_fields],
                     dtype=np.float32), time_field_value)
+                path_id = row[self.path_id_field]
 
-                groundtruth_dict[row[self.path_id_field]].append(state)
+                if path_id not in groundtruth_dict:
+                    groundtruth_dict[path_id] = GroundTruthPath(
+                        states=[state], id=path_id)
+                else:
+                    groundtruth_dict[path_id].append(state)
+
                 self._groundtruth_paths = set(groundtruth_dict.values())
 
                 yield time_field_value, self._groundtruth_paths
