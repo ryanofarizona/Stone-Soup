@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-from .base import MetricManager
+from typing import Sequence
+
+from .base import MetricManager, MetricGenerator
 from ..base import Property
 from ..dataassociator import Associator
 from ..types.detection import Detection
@@ -14,10 +16,8 @@ class SimpleManager(MetricManager):
     :class:`~.Track`, :class:`~.Detection` and :class:`~.GroundTruthPath`
     objects.
     """
-    generators = Property(list, doc='List of generators to use', default=None)
-    associator = Property(Associator,
-                          doc="Associator to combine tracks and truth",
-                          default=None)
+    generators: Sequence[MetricGenerator] = Property(doc='List of generators to use', default=None)
+    associator: Associator = Property(doc="Associator to combine tracks and truth", default=None)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -82,6 +82,10 @@ class SimpleManager(MetricManager):
         : set of :class:`~.Metric`
             Metrics generated
         """
+
+        if self.associator is not None and self.association_set is None:
+            self.associate_tracks()
+
         metrics = set()
         for generator in self.generators:
             metric = generator.compute_metric(self)

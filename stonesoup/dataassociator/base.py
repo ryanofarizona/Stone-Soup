@@ -16,8 +16,7 @@ class DataAssociator(Base):
     from hypotheses generate from a :class:`~.Hypothesiser`.
     """
 
-    hypothesiser = Property(
-        Hypothesiser,
+    hypothesiser: Hypothesiser = Property(
         doc="Generate a set of hypotheses for each track-detection pair")
 
     @abstractmethod
@@ -35,7 +34,7 @@ class DataAssociator(Base):
 
         Returns
         -------
-        : mapping of :class:`~.Track` : :class:`~.Hypothesis`}
+        : mapping of :class:`~.Track` : :class:`~.Hypothesis`
             Mapping of track to Hypothesis
         """
         raise NotImplementedError
